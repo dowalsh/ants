@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import numpy as np
 
-TESTMODE = False
+TESTMODE = True
+
+run_time_limit = 600  # seconds
 
 # Initialize Pygame
 pygame.init()
@@ -17,7 +19,8 @@ pygame.init()
 timestep = 1/20 # each frame is defined as 1/20 of a second
 
 # define food cadence
-food_cadence = 30 # frequency with which food is dropped in seconds
+food_cadence = 250 # frequency with which food is dropped in seconds
+first_food_drop = 50 # time at which first food is dropped
 food_drop_amount = 50 # 50 food is added each time
 
 # Set up display
@@ -58,7 +61,6 @@ class Food(Entity):
         self.y = random.randint(0, height - self.rect.height)
         self.rect.center = (self.x, self.y)
         
-
 class Ant(Entity):
 
     # add boolean attribute for if ant is retruning to nest
@@ -73,7 +75,7 @@ class Ant(Entity):
         self.angle = random.uniform(0, 2 * math.pi)
 
     def move(self):
-        speed = 2
+        speed = 1
         new_x = self.x + speed * math.cos(self.angle)
         new_y = self.y + speed * math.sin(self.angle)
         # vary angle slightly if ant is not returning to nest
@@ -114,6 +116,7 @@ class SimulationTracker:
     def __init__(self):
         # Initialize histories for tracking simulation variables
         self.arrivals_history = []  # Track cumulative number of ants that have returned
+        self.departures_history = []  # Track cumulative number of ants that have departed
         self.foraging_ants_history = []  # Track number of ants currently foraging
         self.alpha_history = []  # Track the alpha values over time
         self.food_available_history = []  # Track the food available over time
@@ -121,6 +124,7 @@ class SimulationTracker:
         # Set up matplotlib subplots for each variable
         self.fig, self.axs = plt.subplots(4, 1)
         self.arrivals_line, = self.axs[0].plot([], [], label='Arrivals')
+        self.departures_line, = self.axs[0].plot([], [], label='Departures')
         self.ants_line, = self.axs[1].plot([], [], label='Foraging Ants')
         self.alpha_line, = self.axs[2].plot([], [], label='Alpha')
         self.food_available_line, = self.axs[3].plot([], [], label='Food Available')
@@ -131,6 +135,11 @@ class SimulationTracker:
         self.axs[2].set_xlabel('Time (s)')
         self.axs[3].set_xlabel('Time (s))')
 
+        # set window size
+        self.fig.set_size_inches(12, 8)
+        # add space between subplots
+        self.fig.subplots_adjust(hspace=0.5)
+
 
         plt.ion()  # Interactive mode for live updates
 
@@ -139,6 +148,7 @@ class SimulationTracker:
         if self.arrivals_history:
             # Set data for each plot line, scaling the x-axis to time in seconds
             self.arrivals_line.set_data(np.arange(len(self.arrivals_history)) * timestep, self.arrivals_history)
+            self.departures_line.set_data(np.arange(len(self.departures_history)) * timestep, self.departures_history)
             self.ants_line.set_data(np.arange(len(self.foraging_ants_history)) * timestep, self.foraging_ants_history)
             self.alpha_line.set_data(np.arange(len(self.alpha_history)) * timestep, self.alpha_history)
             self.food_available_line.set_data(np.arange(len(self.food_available_history)) * timestep, self.food_available_history)
@@ -153,18 +163,24 @@ class SimulationTracker:
             self.fig.canvas.flush_events()
 
             # Set labels for each subplot
-            self.axs[0].set_ylabel('Arrivals')
+            self.axs[0].set_ylabel('Arrivals/Departures')
+            # add legend
+            self.axs[0].legend()
             self.axs[1].set_ylabel('Foraging Ants')
             self.axs[2].set_ylabel('Alpha')
             self.axs[3].set_ylabel('Food Available')
 
-    def track_all(self, ants_returned_in_this_time_period, foraging_ants, alpha):
+    def track_all(self, arrivals, departures, foraging_ants, alpha):
         # Track all simulation variables in their respective histories
-        # Increment arrivals history cumulatively
+        # Increment arrivals and departures history cumulatively
         if not self.arrivals_history:
-            self.arrivals_history.append(ants_returned_in_this_time_period)
+            self.arrivals_history.append(arrivals)
         else:
-            self.arrivals_history.append(self.arrivals_history[-1] + ants_returned_in_this_time_period)
+            self.arrivals_history.append(self.arrivals_history[-1] + arrivals)
+        if not self.departures_history:
+            self.departures_history.append(departures)
+        else:
+            self.departures_history.append(self.departures_history[-1] + departures)
 
         # Update foraging ants and alpha histories with current values
         self.foraging_ants_history.append(foraging_ants)
@@ -178,20 +194,6 @@ class SimulationTracker:
         self.food_available -= amount
 
     def save_results_to_graphs(self):
-        # Set titles, labels, and legends for the plots
-        self.axs[0].set_title('Arrivals')
-        self.axs[1].set_title('Foraging Ants')
-        self.axs[2].set_title('Alpha')
-
-        # Set x-axis labels
-        self.axs[0].set_xlabel('Time Slots')
-        self.axs[1].set_xlabel('Time Slots')
-        self.axs[2].set_xlabel('Time Slots')
-
-        # Add legends to each subplot
-        self.axs[0].legend()
-        self.axs[1].legend()
-        self.axs[2].legend()
 
         # Save the final plot to a file named after the food cadence
         self.fig.savefig(f'results_{food_cadence}.png')
@@ -211,15 +213,17 @@ def add_food(food_list, num_food, nest, ant_list, simulation_tracker):
 # Main game loop
 def main():
 
+    # track total distance travelled by ants as a measure of efficiency
+    total_distance_travelled = 0
+
+    global TESTMODE
     frame_count = 0
 
     plt.ion()
     simulation_tracker = SimulationTracker()
 
-
     # create nest object and draw it
     nest = Entity(width // 2, height // 2, os.path.join("images", "nest.webp"), (100, 100))
-    nest.draw()
 
     # create list of ants
     ant_list = []
@@ -231,16 +235,13 @@ def main():
     food_list = []
 
     clock = pygame.time.Clock()
-    start_time = time.time()
-    run_time_limit = 180  # seconds
 
     food_count = 0
     alpha = 0.01 # alpha 0
     departures = 0
 
-    while time.time() - start_time < run_time_limit:
+    while frame_count*timestep < run_time_limit:
         frame_count += 1
-        screen.fill(background_color)
 
         arrivals = 0
 
@@ -280,14 +281,31 @@ def main():
         # move and draw ants
         for ant in ant_list:
             ant.move()
-            ant.draw()
+            # add distance travelled by ant to total distance travelled
+            total_distance_travelled += 2
 
-        # draw food
-        for food in food_list:
-            food.draw()
 
-        # draw nest
-        nest.draw()
+        if not TESTMODE:
+
+            screen.fill(background_color)
+
+            for ant in ant_list:
+                ant.draw()
+
+            for food in food_list:
+                food.draw()
+
+            nest.draw()
+
+
+                
+            # clock.tick(20)
+
+            pygame.display.flip()
+        
+        # update graph every 5 seconds
+        if frame_count % 100 == 0:
+            simulation_tracker.update(0)
 
         for ant in ant_list:
             for food in food_list:
@@ -304,25 +322,21 @@ def main():
 
         # def track_all(self, food_eaten_increment, foraging_ants, alpha):
         # update simulation tracker
-        simulation_tracker.track_all(arrivals, len(ant_list), alpha)
+        simulation_tracker.track_all(arrivals, departures, len(ant_list), alpha)
 
-        # update graph every 5 seconds
-        if frame_count % 100 == 0:
-            simulation_tracker.update(0)
-        
-        if frame_count % (food_cadence/timestep) == 0:
+        if (frame_count-first_food_drop/timestep) % (food_cadence/timestep) == 0:
             add_food(food_list, food_drop_amount, nest, ant_list, simulation_tracker)
 
-        pygame.display.flip()
-        clock.tick(20)
 
     # Save results to graphs at the end of the simulation
     simulation_tracker.save_results_to_graphs()
 
+    print(f"Total distance travelled by ants: {total_distance_travelled}")
+
 
 # should see 0.15 to 1.2 ants per sec)
-def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.602, q=0.2, d=0, alpha_0=0.01):
-# def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.4, q=0.05, d=0.05, alpha_0=0.03):
+# def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.602, q=0.2, d=0, alpha_0=0.01):
+def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.6, q=0.2, d=0.05, alpha_0=0.01):
     """
     Calculate the number of ants departing for foraging.
     alpha_prev: Previous rate of outgoing foragers
@@ -332,6 +346,7 @@ def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.602,
     Returns updated rate, departure count, and foraging ants count
     """
     alpha_n = max(alpha_prev - q * departure_prev + c * arrivals - d, alpha_0)
+    alpha_n=  0.05
     D_n = np.random.poisson(alpha_n)
     foraging_ants += D_n
     return alpha_n, D_n, foraging_ants
