@@ -310,15 +310,14 @@ def main():
         for ant in ant_list:
             for food in food_list:
                 if ant.rect.colliderect(food.rect) and ant.returning_with_food == False:
-                    # might need to take account that an ant can hit multiple foods.
-                    # print("Ant hits the food")
                     # delete food
                     food_list.remove(food)
                     # send ant back to nest
                     ant.return_to_nest(nest.x, nest.y)
                     ant.collect_food()
-
                     food_count += 1
+                    # move on to the next ant (since an ant can hit multiple foods)
+                    break
 
         # def track_all(self, food_eaten_increment, foraging_ants, alpha):
         # update simulation tracker
