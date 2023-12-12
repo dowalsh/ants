@@ -8,8 +8,17 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import numpy as np
 
+TESTMODE = False
+
 # Initialize Pygame
 pygame.init()
+
+# define timestep
+timestep = 1/20 # each frame is defined as 1/20 of a second
+
+# define food cadence
+food_cadence = 30 # frequency with which food is dropped in seconds
+food_drop_amount = 50 # 50 food is added each time
 
 # Set up display
 width, height = 800, 600
@@ -99,65 +108,114 @@ class Ant(Entity):
         self.image = pygame.transform.scale(self.image, (30, 30))
 
 class SimulationTracker:
-    def __init__(self):
-        self.arrivals_history = []
-        self.foraging_ants_history = []
-        self.alpha_history = []
 
-        self.fig, self.axs = plt.subplots(3, 1)
-        self.arrivals_line, = self.axs[0].plot([], [], label='Food Eaten')
+    food_available = 0
+
+    def __init__(self):
+        # Initialize histories for tracking simulation variables
+        self.arrivals_history = []  # Track cumulative number of ants that have returned
+        self.foraging_ants_history = []  # Track number of ants currently foraging
+        self.alpha_history = []  # Track the alpha values over time
+        self.food_available_history = []  # Track the food available over time
+
+        # Set up matplotlib subplots for each variable
+        self.fig, self.axs = plt.subplots(4, 1)
+        self.arrivals_line, = self.axs[0].plot([], [], label='Arrivals')
         self.ants_line, = self.axs[1].plot([], [], label='Foraging Ants')
         self.alpha_line, = self.axs[2].plot([], [], label='Alpha')
+        self.food_available_line, = self.axs[3].plot([], [], label='Food Available')
 
-        plt.ion()  # Turn on interactive mode
+        # add x axis labels
+        self.axs[0].set_xlabel('Time (s)')
+        self.axs[1].set_xlabel('Time (s)')
+        self.axs[2].set_xlabel('Time (s)')
+        self.axs[3].set_xlabel('Time (s))')
+
+
+        plt.ion()  # Interactive mode for live updates
 
     def update(self, frame):
+        # Update each line in the plot with new data
         if self.arrivals_history:
-            self.arrivals_line.set_data(range(len(self.arrivals_history)), self.arrivals_history)
-            self.ants_line.set_data(range(len(self.foraging_ants_history)), self.foraging_ants_history)
-            self.alpha_line.set_data(range(len(self.alpha_history)), self.alpha_history)
+            # Set data for each plot line, scaling the x-axis to time in seconds
+            self.arrivals_line.set_data(np.arange(len(self.arrivals_history)) * timestep, self.arrivals_history)
+            self.ants_line.set_data(np.arange(len(self.foraging_ants_history)) * timestep, self.foraging_ants_history)
+            self.alpha_line.set_data(np.arange(len(self.alpha_history)) * timestep, self.alpha_history)
+            self.food_available_line.set_data(np.arange(len(self.food_available_history)) * timestep, self.food_available_history)
 
+            # Adjust axes limits dynamically and refresh the plot
             for ax in self.axs:
                 ax.relim()
                 ax.autoscale_view()
 
+            # Redraw and flush events for interactive update
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
 
-            # add axes labels
+            # Set labels for each subplot
             self.axs[0].set_ylabel('Arrivals')
             self.axs[1].set_ylabel('Foraging Ants')
             self.axs[2].set_ylabel('Alpha')
+            self.axs[3].set_ylabel('Food Available')
 
     def track_all(self, ants_returned_in_this_time_period, foraging_ants, alpha):
+        # Track all simulation variables in their respective histories
+        # Increment arrivals history cumulatively
         if not self.arrivals_history:
             self.arrivals_history.append(ants_returned_in_this_time_period)
         else:
             self.arrivals_history.append(self.arrivals_history[-1] + ants_returned_in_this_time_period)
 
-        # Update foraging ants and alpha histories
+        # Update foraging ants and alpha histories with current values
         self.foraging_ants_history.append(foraging_ants)
         self.alpha_history.append(alpha)
+        self.food_available_history.append(self.food_available)
+
+    def add_food(self, amount):
+        self.food_available += amount
+
+    def remove_food(self, amount):
+        self.food_available -= amount
 
     def save_results_to_graphs(self):
-        # Save results to graphs
-        self.axs[0].set_title('Food Eaten')
+        # Set titles, labels, and legends for the plots
+        self.axs[0].set_title('Arrivals')
         self.axs[1].set_title('Foraging Ants')
         self.axs[2].set_title('Alpha')
 
+        # Set x-axis labels
         self.axs[0].set_xlabel('Time Slots')
         self.axs[1].set_xlabel('Time Slots')
         self.axs[2].set_xlabel('Time Slots')
 
+        # Add legends to each subplot
         self.axs[0].legend()
         self.axs[1].legend()
         self.axs[2].legend()
 
-        self.fig.savefig('results.png')
+        # Save the final plot to a file named after the food cadence
+        self.fig.savefig(f'results_{food_cadence}.png')
+
+# add food
+def add_food(food_list, num_food, nest, ant_list, simulation_tracker):
+    for i in range(num_food):
+        # create food at origin
+        food = Food(0, 0)
+        # move food to random location until it is not colliding with other objects
+        while food.rect.colliderect(nest.rect) or food.rect.collidelist(food_list) != -1 or food.rect.collidelist(ant_list) != -1 :
+            # move food to random location
+            food.move()
+        food_list.append(food)
+    simulation_tracker.add_food(len(food_list))
 
 # Main game loop
 def main():
+
+    frame_count = 0
+
     plt.ion()
+    simulation_tracker = SimulationTracker()
+
 
     # create nest object and draw it
     nest = Entity(width // 2, height // 2, os.path.join("images", "nest.webp"), (100, 100))
@@ -169,28 +227,19 @@ def main():
     ant = Ant(width // 2, height // 2)
     ant_list.append(ant)
 
-    # Create 100 food objects
+    # create list of food
     food_list = []
-    for i in range(100):
-        # create food at origin
-        food = Food(0, 0)
-        # move food to random location until it is not colliding with other objects
-        while food.rect.colliderect(nest.rect) or food.rect.collidelist(food_list) != -1 or food.rect.collidelist(ant_list) != -1 :
-            # move food to random location
-            food.move()
-        food_list.append(food)
-
-    simulation_tracker = SimulationTracker()
 
     clock = pygame.time.Clock()
     start_time = time.time()
-    run_time_limit = 60  # seconds
+    run_time_limit = 180  # seconds
 
     food_count = 0
     alpha = 0.01 # alpha 0
     departures = 0
 
     while time.time() - start_time < run_time_limit:
+        frame_count += 1
         screen.fill(background_color)
 
         arrivals = 0
@@ -207,6 +256,7 @@ def main():
             if ant.returning_with_food and ant.rect.colliderect(nest.rect):
                 # remove this ant from the list   
                 ant_list.remove(ant)
+                simulation_tracker.remove_food(1)
                 arrivals += 1
             elif ant.has_left_nest and ant.rect.colliderect(nest.rect):
                 # ant has hit nest but does not have food
@@ -214,51 +264,19 @@ def main():
                 ant_list.remove(ant)
                 
    
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
 
         # get number of ants to add using get_departures function
-        # def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.602, q=0.05, d=0.01, alpha_0=0.03):
-        # return alpha_n, D_n, foraging_ants
-
         alpha, departures, foraging_ants = get_departures(alpha, departures, arrivals, len(ant_list))
    
         # add new ants to ant list
         for i in range(departures):
             ant = Ant(width // 2, height // 2)
             ant_list.append(ant)
-
-
-        # every 30 frames, add new ants
-        # if pygame.time.get_ticks() % 30 == 0:
-        #     # use poisson distrubution to determine number of ants to add based on amount of food eaten
-        #     # get amount of food eaten in last 30 frames
-
-        #     # print amount of food eaten in last 30 frames
-        #     print("food count this time period: ", food_count)
-        #     # use poisson distribution to determine number of ants to add
-        #     rate_constant = 2  # Adjust this value based on your desired rate of ant additions
-        #     num_ants_to_add = np.random.poisson(food_count * rate_constant, 1)
-            
-        #     # add a minimum of 1 ant
-        #     if num_ants_to_add[0] == 0:
-        #         num_ants_to_add[0] = 1
-        #     # print number of ants to add
-        #     print("number of ants to add: ", num_ants_to_add)
-        #     # add new ants to ant list
-        #     for i in range(num_ants_to_add[0]):
-        #         ant = Ant(width // 2, height // 2)
-        #         ant_list.append(ant)
-
-        #     # reset food count
-        #     food_count = 0
-
   
-
-
         # move and draw ants
         for ant in ant_list:
             ant.move()
@@ -287,12 +305,16 @@ def main():
         # def track_all(self, food_eaten_increment, foraging_ants, alpha):
         # update simulation tracker
         simulation_tracker.track_all(arrivals, len(ant_list), alpha)
-        # update graph every 30 frames
-        if pygame.time.get_ticks() % 30 == 0:
+
+        # update graph every 5 seconds
+        if frame_count % 100 == 0:
             simulation_tracker.update(0)
+        
+        if frame_count % (food_cadence/timestep) == 0:
+            add_food(food_list, food_drop_amount, nest, ant_list, simulation_tracker)
 
         pygame.display.flip()
-        clock.tick(30)
+        clock.tick(20)
 
     # Save results to graphs at the end of the simulation
     simulation_tracker.save_results_to_graphs()
