@@ -10,8 +10,6 @@ import numpy as np
 
 TESTMODE = True
 
-run_time_limit = 600  # seconds
-
 # Initialize Pygame
 pygame.init()
 
@@ -19,9 +17,11 @@ pygame.init()
 timestep = 1/20 # each frame is defined as 1/20 of a second
 
 # define food cadence
-food_cadence = 250 # frequency with which food is dropped in seconds
-first_food_drop = 50 # time at which first food is dropped
-food_drop_amount = 50 # 50 food is added each time
+food_cadence = 2000 # frequency with which food is dropped in seconds
+first_food_drop = 250 # time at which first food is dropped
+food_drop_amount = 20 # food added each time
+
+run_time_limit = 2000
 
 # Set up display
 width, height = 800, 600
@@ -113,7 +113,9 @@ class SimulationTracker:
 
     food_available = 0
 
-    def __init__(self):
+    def __init__(self, c):
+
+        self.c = c
         # Initialize histories for tracking simulation variables
         self.arrivals_history = []  # Track cumulative number of ants that have returned
         self.departures_history = []  # Track cumulative number of ants that have departed
@@ -195,11 +197,11 @@ class SimulationTracker:
 
     def save_results_to_graphs(self):
 
-        # Save the final plot to a file named after the food cadence
-        self.fig.savefig(f'results_{food_cadence}.png')
+        # Save the final plot to results folder as a file named after the c value
+        self.fig.savefig(os.path.join("results", f"simulation_results_c={self.c}.png"))
 
 # add food
-def add_food(food_list, num_food, nest, ant_list, simulation_tracker):
+def spawn_food(food_list, num_food, nest, ant_list, simulation_tracker):
     for i in range(num_food):
         # create food at origin
         food = Food(0, 0)
@@ -208,36 +210,36 @@ def add_food(food_list, num_food, nest, ant_list, simulation_tracker):
             # move food to random location
             food.move()
         food_list.append(food)
-    simulation_tracker.add_food(len(food_list))
+    simulation_tracker.add_food(num_food)
 
 # Main game loop
-def main():
+def main(c=0.602, q=0.05, d=0, alpha_min=0.01, visible=True):
 
     # track total distance travelled by ants as a measure of efficiency
     total_distance_travelled = 0
+    # track maximum number of active foragers
+    max_foragers = 0
+    # track average time taken to collect all food
+    time_taken_list = []
 
     global TESTMODE
     frame_count = 0
 
     plt.ion()
-    simulation_tracker = SimulationTracker()
+    simulation_tracker = SimulationTracker(c)
 
     # create nest object and draw it
     nest = Entity(width // 2, height // 2, os.path.join("images", "nest.webp"), (100, 100))
 
     # create list of ants
     ant_list = []
-    # start with one ant in the middle of the screen
-    ant = Ant(width // 2, height // 2)
-    ant_list.append(ant)
 
     # create list of food
     food_list = []
 
     clock = pygame.time.Clock()
 
-    food_count = 0
-    alpha = 0.01 # alpha 0
+    alpha = 0 # alpha 0
     departures = 0
 
     while frame_count*timestep < run_time_limit:
@@ -259,6 +261,11 @@ def main():
                 ant_list.remove(ant)
                 simulation_tracker.remove_food(1)
                 arrivals += 1
+                if simulation_tracker.food_available == 0:
+                    # print time taken to collect all food
+                    time_taken = frame_count*timestep - food_added_time
+                    # print(f"Time taken to collect all food: {time_taken}")
+                    time_taken_list.append(time_taken)
             elif ant.has_left_nest and ant.rect.colliderect(nest.rect):
                 # ant has hit nest but does not have food
                 # delete ant but do not add to arrivals
@@ -271,7 +278,7 @@ def main():
                 sys.exit()
 
         # get number of ants to add using get_departures function
-        alpha, departures, foraging_ants = get_departures(alpha, departures, arrivals, len(ant_list))
+        alpha, departures, foraging_ants = get_departures(alpha, departures, arrivals, len(ant_list), c=c, q=q, d=d, alpha_min=alpha_min)
    
         # add new ants to ant list
         for i in range(departures):
@@ -303,9 +310,10 @@ def main():
 
             pygame.display.flip()
         
-        # update graph every 5 seconds
-        if frame_count % 100 == 0:
-            simulation_tracker.update(0)
+        # if visible:
+            # update graph 
+        # if frame_count % 1000 == 0:
+        #     simulation_tracker.update(0)
 
         for ant in ant_list:
             for food in food_list:
@@ -315,7 +323,6 @@ def main():
                     # send ant back to nest
                     ant.return_to_nest(nest.x, nest.y)
                     ant.collect_food()
-                    food_count += 1
                     # move on to the next ant (since an ant can hit multiple foods)
                     break
 
@@ -324,18 +331,35 @@ def main():
         simulation_tracker.track_all(arrivals, departures, len(ant_list), alpha)
 
         if (frame_count-first_food_drop/timestep) % (food_cadence/timestep) == 0:
-            add_food(food_list, food_drop_amount, nest, ant_list, simulation_tracker)
+            spawn_food(food_list, food_drop_amount, nest, ant_list, simulation_tracker)
+            food_added_time = frame_count*timestep
+
+        # update max foragers
+        if len(ant_list) > max_foragers:
+            max_foragers = len(ant_list)
+
 
 
     # Save results to graphs at the end of the simulation
     simulation_tracker.save_results_to_graphs()
 
-    print(f"Total distance travelled by ants: {total_distance_travelled}")
+    # print(f"Total distance travelled by ants: {total_distance_travelled/1000} thousand steps")
+    # print(f"Maximum number of foragers: {max_foragers}")
+
+    # check if time_taken_list is empty
+    if not time_taken_list:        
+        # print error message
+        print("No food collected")
+
+    # close figure
+    plt.close()
+
+    return np.mean(time_taken_list), total_distance_travelled, max_foragers
 
 
 # should see 0.15 to 1.2 ants per sec)
-# def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.602, q=0.2, d=0, alpha_0=0.01):
-def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.6, q=0.2, d=0.05, alpha_0=0.01):
+# def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.602, q=0.2, d=0, alpha_min=0.01):
+def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c, q, d, alpha_min):
     """
     Calculate the number of ants departing for foraging.
     alpha_prev: Previous rate of outgoing foragers
@@ -344,13 +368,40 @@ def get_departures(alpha_prev, departure_prev, arrivals, foraging_ants, c=0.6, q
     foraging_ants: Current number of ants out foraging
     Returns updated rate, departure count, and foraging ants count
     """
-    alpha_n = max(alpha_prev - q * departure_prev + c * arrivals - d, alpha_0)
-    alpha_n=  0.05
-    D_n = np.random.poisson(alpha_n)
+    alpha_n = max(alpha_prev - q * departure_prev + c * arrivals - d, alpha_min)
+    # alpha_n=  1
+    D_n = np.random.poisson(alpha_n*timestep)
     foraging_ants += D_n
     return alpha_n, D_n, foraging_ants
 
+def run_experiments():
+    for c in [0.1, 0.3, 0.6, 0.9]:
+        print(f"Running experiment with c={c}")
+        main(c=c)
+    return
 
+def run_multiple(N):
+    for c in [0.1, 0.3, 0.602, 0.9]:
+        print(f"======== Running experiment with c={c} =========")
+        all_times_taken = []
+        all_distances_travelled = []
+        all_max_foragers = []
+
+        for i in range(N):
+            # print(f"===== Running simulation {i+1} =====")
+            times_taken, total_distance_travelled, max_foragers = main(visible=False, c=c)
+            all_times_taken.append(times_taken)
+            all_distances_travelled.append(total_distance_travelled)
+            all_max_foragers.append(max_foragers)
+
+        print(f"Average time taken to collect all food: {np.mean(all_times_taken)}")
+        print(f"Average distance travelled by ants: {np.mean(total_distance_travelled)}")
+        print(f"Average maximum number of foragers: {np.mean(max_foragers)}")
+    
+
+    
 # Run the simulation
 if __name__ == "__main__":
-    main()
+    # main()
+    # run_experiments()
+    run_multiple(10)
