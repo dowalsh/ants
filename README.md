@@ -1,2 +1,2 @@
 # ants
-Ant Algorithm Simualtion for Bio-inspired Robotics
+Ant Algorithm Simulation for Bio-inspired Robotics Course
